@@ -1,0 +1,29 @@
+name: ParallaxBGTest
+options:
+  deploymentTarget:
+    iOS: "18.0"
+  bundleIdPrefix: com.menno
+  xcodeVersion: "16"
+
+packages:
+  ReveryParallaxViewer:
+    path: ../ReveryParallaxViewer
+
+targets:
+  ParallaxBGTest:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+        resourceIncludeFiles:
+          - "*.png"
+    dependencies:
+      - package: ReveryParallaxViewer
+        product: ReveryParallaxViewer
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        INFOPLIST_FILE: Sources/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.menno.ParallaxBGTest
+        DEVELOPMENT_TEAM: 76E728B7KH
+        CODE_SIGN_STYLE: Automatic
