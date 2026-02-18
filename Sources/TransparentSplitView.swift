@@ -167,30 +167,9 @@ private struct TabBarPill: View {
             }
         }
         .onAppear { indicatorOffset = targetOffset(for: selection) }
-        // No withAnimation here — indicator has .animation(spring, value: indicatorOffset)
-        // which animates automatically whenever indicatorOffset changes, immune to
-        // binding re-render cascade that was swallowing withAnimation context.
         .onChange(of: selection) { _, v in indicatorOffset = targetOffset(for: v) }
         .scaleEffect(pillScale)
         .animation(pressSpring, value: pillScale)
-        // simultaneousGesture: buttons fire on tap, drag fires on swipe — both work.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 10)
-                .updating($dragTranslation) { value, state, _ in
-                    state = value.translation.width
-                }
-                .onChanged { _ in
-                    if pillScale < 1.04 { pillScale = 1.04 }
-                }
-                .onEnded { value in
-                    let currentX = indicatorOffset + value.translation.width
-                    let clamped = min(max(Int(((currentX - indicatorInset) / itemWidth).rounded()), 0), items.count - 1)
-                    // Direct assignment — .animation(spring, value: indicatorOffset) handles snap
-                    indicatorOffset = targetOffset(for: clamped)
-                    selection = clamped
-                    withAnimation(pressSpring) { pillScale = 1.0 }
-                }
-        )
         // ── Outer pill chrome ─────────────────────────────────────────
         .background {
             ZStack {
@@ -236,12 +215,25 @@ private struct TabBarPill: View {
                     )
             }
             .frame(width: itemWidth - indicatorInset * 2, height: itemHeight - indicatorInset * 2)
-            // indicatorOffset is CGFloat → withAnimation interpolates it smoothly.
-            // dragTranslation adds live finger tracking on top.
             .offset(x: indicatorOffset + dragTranslation, y: indicatorInset)
-            // Implicit animation: fires whenever indicatorOffset changes, immune to
-            // binding re-render cascade that was swallowing withAnimation context.
             .animation(spring, value: indicatorOffset)
+            // Drag only on the indicator — no interference with tab buttons.
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($dragTranslation) { value, state, _ in
+                        state = value.translation.width
+                    }
+                    .onChanged { _ in
+                        if pillScale < 1.04 { pillScale = 1.04 }
+                    }
+                    .onEnded { value in
+                        let currentX = indicatorOffset + value.translation.width
+                        let clamped = min(max(Int(((currentX - indicatorInset) / itemWidth).rounded()), 0), items.count - 1)
+                        indicatorOffset = targetOffset(for: clamped)
+                        selection = clamped
+                        withAnimation(pressSpring) { pillScale = 1.0 }
+                    }
+            )
     }
 
     @ViewBuilder
