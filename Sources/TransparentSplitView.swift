@@ -167,13 +167,13 @@ private struct TabBarPill: View {
             }
         }
         .onAppear { indicatorOffset = targetOffset(for: selection) }
-        .onChange(of: selection) { _, v in
-            withAnimation(spring) { indicatorOffset = targetOffset(for: v) }
-        }
+        // No withAnimation here — indicator has .animation(spring, value: indicatorOffset)
+        // which animates automatically whenever indicatorOffset changes, immune to
+        // binding re-render cascade that was swallowing withAnimation context.
+        .onChange(of: selection) { _, v in indicatorOffset = targetOffset(for: v) }
         .scaleEffect(pillScale)
         .animation(pressSpring, value: pillScale)
-        // simultaneousGesture lets buttons AND the drag both fire.
-        // Buttons handle tap-to-select. Drag handles swipe-to-slide.
+        // simultaneousGesture: buttons fire on tap, drag fires on swipe — both work.
         .simultaneousGesture(
             DragGesture(minimumDistance: 10)
                 .updating($dragTranslation) { value, state, _ in
@@ -184,10 +184,9 @@ private struct TabBarPill: View {
                 }
                 .onEnded { value in
                     let currentX = indicatorOffset + value.translation.width
-                    let lo = indicatorInset
-                    let hi = targetOffset(for: items.count - 1)
                     let clamped = min(max(Int(((currentX - indicatorInset) / itemWidth).rounded()), 0), items.count - 1)
-                    withAnimation(spring) { indicatorOffset = targetOffset(for: clamped) }
+                    // Direct assignment — .animation(spring, value: indicatorOffset) handles snap
+                    indicatorOffset = targetOffset(for: clamped)
                     selection = clamped
                     withAnimation(pressSpring) { pillScale = 1.0 }
                 }
@@ -240,13 +239,17 @@ private struct TabBarPill: View {
             // indicatorOffset is CGFloat → withAnimation interpolates it smoothly.
             // dragTranslation adds live finger tracking on top.
             .offset(x: indicatorOffset + dragTranslation, y: indicatorInset)
+            // Implicit animation: fires whenever indicatorOffset changes, immune to
+            // binding re-render cascade that was swallowing withAnimation context.
+            .animation(spring, value: indicatorOffset)
     }
 
     @ViewBuilder
     private func tabItem(index i: Int) -> some View {
         let isSelected = selection == i
         Button {
-            withAnimation(spring) { indicatorOffset = targetOffset(for: i) }
+            // Direct assignment — .animation(spring, value: indicatorOffset) handles snap
+            indicatorOffset = targetOffset(for: i)
             selection = i
             withAnimation(.spring(response: 0.18, dampingFraction: 0.45)) { pillScale = 1.05 }
             Task {
