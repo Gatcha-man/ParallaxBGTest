@@ -124,47 +124,41 @@ public struct TransparentTabBar<Content: View>: View {
 // No-flash floating pill tab bar with drag-to-switch.
 //
 // Key design decisions:
-//   • indicator offset = indicatorIndex * itemWidth + @GestureState dragTranslation
-//   • Tap: withAnimation { indicatorIndex = i } — spring slide via withAnimation
-//   • Drag: @GestureState dragTranslation updates in real-time (gesture framework
-//     bypasses child button priority). On end, withAnimation snaps indicatorIndex.
-//   • highPriorityGesture — drag (>8pt) wins over child button taps. Taps (<8pt)
-//     still fire buttons because DragGesture fails to start.
-//   • Outer pill scales 1.05× on tap (Task bounce), 1.04× while dragging.
-//   • Only the pressed button's content scales up (PressScaleButtonStyle).
+//   • @State indicatorOffset: CGFloat — directly animatable by withAnimation.
+//     Using Int was the bug: SwiftUI can't interpolate Int for smooth slides.
+//   • @GestureState dragTranslation added on top for real-time finger tracking.
+//   • Tap: withAnimation(spring) { indicatorOffset = targetOffset(i) } → smooth slide.
+//   • Drag: .simultaneousGesture so buttons AND drag both work. dragTranslation
+//     follows finger; .onEnded snaps with withAnimation.
+//   • Outer pill: 1.05× bounce on tap, 1.04× scale during drag.
+//   • Only pressed button's content scales (PressScaleButtonStyle).
 
 private struct TabBarPill: View {
     @Binding var selection: Int
     let items: [(label: String, icon: String)]
 
-    @State private var indicatorIndex: Int = 0
-    @State private var pillScale: CGFloat = 1.0
-    // @GestureState is updated directly by the gesture framework — bypasses button
-    // gesture priority so the indicator tracks the finger even when touch starts on a button.
+    // CGFloat — directly animatable. withAnimation smoothly interpolates the x offset.
+    // Int was the bug: SwiftUI can't interpolate Int, so no slide animation fired.
+    @State private var indicatorOffset: CGFloat = 0
+    // Gesture framework writes this directly, so it updates every frame during drag
+    // regardless of button gesture competition.
     @GestureState private var dragTranslation: CGFloat = 0
+    @State private var pillScale: CGFloat = 1.0
 
-    private let itemWidth: CGFloat  = 70   // narrower to fit 5 tabs
+    private let itemWidth: CGFloat  = 70
     private let itemHeight: CGFloat = 56
     private let indicatorInset: CGFloat = 5
 
     private let spring      = Animation.spring(response: 0.33, dampingFraction: 0.72)
     private let pressSpring = Animation.spring(response: 0.22, dampingFraction: 0.6)
 
-    // Indicator x position: slot base + live drag delta, clamped to pill bounds
-    private var indicatorX: CGFloat {
-        let base = CGFloat(indicatorIndex) * itemWidth + indicatorInset
-        let lo   = indicatorInset
-        let hi   = CGFloat(items.count - 1) * itemWidth + indicatorInset
-        return min(max(base + dragTranslation, lo), hi)
+    private func targetOffset(for index: Int) -> CGFloat {
+        CGFloat(index) * itemWidth + indicatorInset
     }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-
-            // ── Persistent indicator (never removed) ──────────────────
             indicator
-
-            // ── Tab items ────────────────────────────────────────────
             HStack(spacing: 0) {
                 ForEach(items.indices, id: \.self) { i in
                     tabItem(index: i)
@@ -172,28 +166,28 @@ private struct TabBarPill: View {
                 }
             }
         }
-        .onAppear { indicatorIndex = selection }
+        .onAppear { indicatorOffset = targetOffset(for: selection) }
         .onChange(of: selection) { _, v in
-            withAnimation(spring) { indicatorIndex = v }
+            withAnimation(spring) { indicatorOffset = targetOffset(for: v) }
         }
         .scaleEffect(pillScale)
         .animation(pressSpring, value: pillScale)
-        // ── Drag gesture: highPriority overrides child button priority so drag
-        //    always starts after 8pt movement. Taps (<8pt) still fire buttons. ──
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 8)
+        // simultaneousGesture lets buttons AND the drag both fire.
+        // Buttons handle tap-to-select. Drag handles swipe-to-slide.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 10)
                 .updating($dragTranslation) { value, state, _ in
                     state = value.translation.width
                 }
                 .onChanged { _ in
-                    // Implicit animation via .animation(pressSpring, value: pillScale)
                     if pillScale < 1.04 { pillScale = 1.04 }
                 }
                 .onEnded { value in
-                    let base    = CGFloat(indicatorIndex) * itemWidth
-                    let finalX  = base + value.translation.width
-                    let clamped = min(max(Int((finalX / itemWidth).rounded()), 0), items.count - 1)
-                    withAnimation(spring) { indicatorIndex = clamped }
+                    let currentX = indicatorOffset + value.translation.width
+                    let lo = indicatorInset
+                    let hi = targetOffset(for: items.count - 1)
+                    let clamped = min(max(Int(((currentX - indicatorInset) / itemWidth).rounded()), 0), items.count - 1)
+                    withAnimation(spring) { indicatorOffset = targetOffset(for: clamped) }
                     selection = clamped
                     withAnimation(pressSpring) { pillScale = 1.0 }
                 }
@@ -225,8 +219,6 @@ private struct TabBarPill: View {
         .padding(.bottom, safeAreaBottom + 4)
     }
 
-    // Indicator: offset driven by indicatorX (= slot + dragOffset).
-    // No .animation() modifier — all motion comes from withAnimation calls above.
     private var indicator: some View {
         Capsule()
             .fill(Color.accentColor.opacity(0.07))
@@ -244,21 +236,18 @@ private struct TabBarPill: View {
                         )
                     )
             }
-            .frame(
-                width:  itemWidth  - indicatorInset * 2,
-                height: itemHeight - indicatorInset * 2
-            )
-            .offset(x: indicatorX, y: indicatorInset)
+            .frame(width: itemWidth - indicatorInset * 2, height: itemHeight - indicatorInset * 2)
+            // indicatorOffset is CGFloat → withAnimation interpolates it smoothly.
+            // dragTranslation adds live finger tracking on top.
+            .offset(x: indicatorOffset + dragTranslation, y: indicatorInset)
     }
 
     @ViewBuilder
     private func tabItem(index i: Int) -> some View {
         let isSelected = selection == i
-
         Button {
-            withAnimation(spring) { indicatorIndex = i }
+            withAnimation(spring) { indicatorOffset = targetOffset(for: i) }
             selection = i
-            // Bounce the outer pill
             withAnimation(.spring(response: 0.18, dampingFraction: 0.45)) { pillScale = 1.05 }
             Task {
                 try? await Task.sleep(for: .milliseconds(130))
